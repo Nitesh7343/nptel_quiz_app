@@ -1,12 +1,18 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { ArrowLeft, ArrowRight, Check, CheckCircle2, ChevronDown, Circle, RotateCcw, Sparkles, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check, CheckCircle2, ChevronDown, Circle, Moon, RotateCcw, Sparkles, Sun, X } from 'lucide-react';
 import assignments from './questions.json';
 import './styles.css';
 
 const STORE_KEY = 'nptel-practice-progress-v1';
 const emptyState = () => ({ answers: {}, completed: {} });
 const TEST_LENGTHS = [15, 20, 30, 40, 50];
+
+function lengthsAvailableThrough(week) {
+  const available = assignments.filter((assignment) => assignment.week <= week).reduce((sum, assignment) => sum + assignment.questions.length, 0);
+  const validLengths = TEST_LENGTHS.filter((length) => length <= available);
+  return validLengths.length ? validLengths : [available];
+}
 
 function shuffled(items) {
   const result = [...items];
@@ -22,15 +28,30 @@ function readProgress() {
   catch { return emptyState(); }
 }
 
+function readTheme() {
+  try { return localStorage.getItem('nptel-theme') === 'dark' ? 'dark' : 'light'; }
+  catch { return 'light'; }
+}
+
 function TestMode({ onBack }) {
   const [stage, setStage] = useState('setup');
   const [length, setLength] = useState(20);
+  const [weekLimit, setWeekLimit] = useState(assignments.length);
   const [questions, setQuestions] = useState([]);
   const [answers, setAnswers] = useState({});
   const [index, setIndex] = useState(0);
+  const availableLengths = lengthsAvailableThrough(weekLimit);
+  const availableQuestionCount = assignments.filter((assignment) => assignment.week <= weekLimit).reduce((sum, assignment) => sum + assignment.questions.length, 0);
+
+  function changeWeekLimit(event) {
+    const nextWeek = Number(event.target.value);
+    const nextLengths = lengthsAvailableThrough(nextWeek);
+    setWeekLimit(nextWeek);
+    setLength((current) => nextLengths.includes(current) ? current : nextLengths[nextLengths.length - 1]);
+  }
 
   function startTest() {
-    const pool = assignments.flatMap((assignment) => assignment.questions.map((question) => ({ ...question, week: assignment.week })));
+    const pool = assignments.filter((assignment) => assignment.week <= weekLimit).flatMap((assignment) => assignment.questions.map((question) => ({ ...question, week: assignment.week })));
     setQuestions(shuffled(pool).slice(0, length));
     setAnswers({});
     setIndex(0);
@@ -58,14 +79,22 @@ function TestMode({ onBack }) {
         <span className="test-kicker">A QUICK CHECK OF WHAT YOU KNOW</span>
         <div className="test-hero-icon"><CheckCircle2 size={24} /></div>
         <h1>Ready for a test?</h1>
-        <p className="test-intro">Get a fresh mix of questions from all 12 assignments. Take your time, mark your answers, and see your result when you finish.</p>
+        <p className="test-intro">Choose how many questions to answer and how far through the assignments to include. Mark your answers and see your result when you finish.</p>
+        <div className="week-range-block">
+          <label htmlFor="test-week-limit">Include questions through</label>
+          <select id="test-week-limit" value={weekLimit} onChange={changeWeekLimit}>
+            <option value={assignments.length}>All weeks (1–{assignments.length})</option>
+            {assignments.slice(0, -1).map((assignment) => <option value={assignment.week} key={assignment.week}>Weeks 1–{assignment.week}</option>)}
+          </select>
+          <p>Questions will come from Weeks 1–{weekLimit}. <strong>{availableQuestionCount} available</strong></p>
+        </div>
         <div className="test-length-block">
           <div className="length-heading"><strong>Choose your test length</strong><span>{length} questions</span></div>
           <div className="length-options" role="group" aria-label="Number of test questions">
-            {TEST_LENGTHS.map((amount) => <button key={amount} className={amount === length ? 'length-option selected' : 'length-option'} aria-pressed={amount === length} onClick={() => setLength(amount)}>{amount}</button>)}
+            {availableLengths.map((amount) => <button key={amount} className={amount === length ? 'length-option selected' : 'length-option'} aria-pressed={amount === length} onClick={() => setLength(amount)}>{amount === availableQuestionCount && !TEST_LENGTHS.includes(amount) ? `All ${amount}` : amount}</button>)}
           </div>
         </div>
-        <div className="test-details"><span><Check size={14} /> Random mix from all 12 assignments</span><span><Check size={14} /> Answers revealed at the end</span></div>
+        <div className="test-details"><span><Check size={14} /> Random questions from selected weeks</span><span><Check size={14} /> Answers revealed at the end</span></div>
         <button className="primary-button start-test-button" onClick={startTest}>Start {length}-question test <ArrowRight size={16} /></button>
         <button className="back-to-practice" onClick={onBack}><ArrowLeft size={14} /> Back to weekly practice</button>
       </section>
@@ -137,6 +166,7 @@ function TestMode({ onBack }) {
 function App() {
   const [week, setWeek] = useState(1);
   const [mode, setMode] = useState('practice');
+  const [theme, setTheme] = useState(readTheme);
   const [index, setIndex] = useState(0);
   const [progress, setProgress] = useState(readProgress);
   const [mobileWeeksOpen, setMobileWeeksOpen] = useState(false);
@@ -151,6 +181,11 @@ function App() {
   const percent = Math.round((doneCount / assignment.questions.length) * 100);
 
   useEffect(() => { localStorage.setItem(STORE_KEY, JSON.stringify(progress)); }, [progress]);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    try { localStorage.setItem('nptel-theme', theme); } catch { /* Theme still applies for this session. */ }
+  }, [theme]);
 
   useEffect(() => {
     if (!mobileWeeksOpen) return undefined;
@@ -207,9 +242,12 @@ function App() {
         </a>
         <div className="topbar-actions">
           <nav className="mode-switch" aria-label="Choose practice mode">
-            <button className={mode === 'practice' ? 'mode-active' : ''} aria-current={mode === 'practice' ? 'page' : undefined} onClick={() => setMode('practice')}>Practice</button>
-            <button className={mode === 'test' ? 'mode-active' : ''} aria-current={mode === 'test' ? 'page' : undefined} onClick={() => setMode('test')}>Test</button>
+            <button className={mode === 'practice' ? 'mode-active' : ''} aria-current={mode === 'practice' ? 'page' : undefined} onClick={() => { setMobileWeeksOpen(false); setMode('practice'); }}>Practice</button>
+            <button className={mode === 'test' ? 'mode-active' : ''} aria-current={mode === 'test' ? 'page' : undefined} onClick={() => { setMobileWeeksOpen(false); setMode('test'); }}>Test</button>
           </nav>
+          <button className="theme-toggle" aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'} title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'} onClick={() => setTheme((current) => current === 'dark' ? 'light' : 'dark')}>
+            {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+          </button>
           <div className="exam-note"><span className="live-dot" /> Your focused practice space</div>
         </div>
       </header>
